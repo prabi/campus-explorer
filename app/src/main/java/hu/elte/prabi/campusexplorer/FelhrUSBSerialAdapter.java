@@ -1,10 +1,10 @@
 package hu.elte.prabi.campusexplorer;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import name.antonsmirnov.firmata.serial.ISerial;
 import name.antonsmirnov.firmata.serial.ISerialListener;
@@ -17,8 +17,6 @@ import com.felhr.usbserial.UsbSerialInterface;
  * Wiring felhr.usbserial into antonsmirnov.firmata
  */
 public class FelhrUSBSerialAdapter implements ISerial, UsbSerialInterface.UsbReadCallback {
-
-    private final int firmataBaudRate = 57600;
 
     protected UsbSerialDevice serialDevice;
     protected boolean initialized = false;
@@ -43,7 +41,7 @@ public class FelhrUSBSerialAdapter implements ISerial, UsbSerialInterface.UsbRea
     @Override
     public void start() throws SerialException {
         if (serialDevice != null && serialDevice.open()) {
-            serialDevice.setBaudRate(firmataBaudRate);
+            serialDevice.setBaudRate(57600);
             serialDevice.setDataBits(UsbSerialInterface.DATA_BITS_8);
             serialDevice.setStopBits(UsbSerialInterface.STOP_BITS_1);
             serialDevice.setParity(UsbSerialInterface.PARITY_NONE);
