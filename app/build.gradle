@@ -6,7 +6,7 @@ android {
 
     defaultConfig {
         applicationId "hu.elte.prabi.campusexplorer"
-        minSdkVersion 23
+        minSdkVersion 22
         targetSdkVersion 23
         versionCode 1
         versionName "1.0"
@@ -22,7 +22,9 @@ android {
 dependencies {
     testCompile 'junit:junit:4.12'
     compile 'com.android.support:appcompat-v7:23.3.0'
+    compile 'com.google.android.gms:play-services-location:8.4.0'
     compile 'com.github.felHR85:UsbSerial:4.1.1'
+    compile 'com.github.delight-im:Android-DDP:v3.1.2'
     compile files('libs/Serial-1.1.jar')
     compile files('libs/Firmata-2.6.jar')
 }

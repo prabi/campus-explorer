@@ -16,13 +16,13 @@ import com.felhr.usbserial.UsbSerialInterface;
 /**
  * Wiring felhr.usbserial into antonsmirnov.firmata
  */
-public class FelhrUSBSerialAdapter implements ISerial, UsbSerialInterface.UsbReadCallback {
+class FelhrUSBSerialAdapter implements ISerial, UsbSerialInterface.UsbReadCallback {
 
-    protected UsbSerialDevice serialDevice;
-    protected boolean initialized = false;
-    protected List<ISerialListener> listeners = new ArrayList<>();
-    protected int actualOffset = 0;
-    protected byte[] inputBuffer = new byte[]{};
+    private UsbSerialDevice serialDevice;
+    private boolean initialized = false;
+    private List<ISerialListener> listeners = new ArrayList<>();
+    private int actualOffset = 0;
+    private byte[] inputBuffer = new byte[]{};
 
     public FelhrUSBSerialAdapter(UsbDevice device, UsbDeviceConnection connection) {
         serialDevice = UsbSerialDevice.createUsbSerialDevice(device, connection);

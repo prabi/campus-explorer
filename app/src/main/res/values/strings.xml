@@ -1,6 +1,4 @@
 <resources>
     <string name="app_name">Campus Explorer</string>
-    <string name="connInputHint">IP address : port</string>
-    <string name="startRobotConn">Connect to robot</string>
-    <string name="stopRobotConn">Disconnect from robot</string>
+    <string name="ddp_uri">ws://nimfa.hu:3000/websocket</string>
 </resources>
