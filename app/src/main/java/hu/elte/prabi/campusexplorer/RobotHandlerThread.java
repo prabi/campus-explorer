@@ -7,6 +7,7 @@ import android.location.Location;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
+import android.support.annotation.Nullable;
 import android.util.Log;
 
 import im.delight.android.ddp.Meteor;
@@ -51,29 +52,35 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
         public double lat, lng;
         public int id;
         public String documentId;
+        public boolean visited;
         public Waypoint(double lat, double lng, int id, String documentId){
             this.lat = lat;
             this.lng = lng;
             this.id = id;
             this.documentId = documentId;
+            this.visited = false;
         }
     }
 
     // Communication channel with the user, and places to visit.
     private Meteor mMeteor;
-    private List<Waypoint> waypoints;
+    private List<Waypoint> waypoints = new LinkedList<>();
 
     public RobotHandlerThread(Handler handler,   // Message Handler of the UI thread
                               Context context,   // Application Context for Meteor DDP
                               UsbDevice device,
                               UsbDeviceConnection connection) {
         super("RobotHandlerThread");
-        start();
         uiHandler = handler;
+        robot = new Firmata(new FelhrUSBSerialAdapter(device, connection));
+        mMeteor = new Meteor(context, context.getResources().getString(R.string.ddp_uri));
+    }
+
+    @Override
+    protected void onLooperPrepared() {
         robotHandler = new Handler(getLooper());
 
         // Robot initialization.
-        robot = new Firmata(new FelhrUSBSerialAdapter(device, connection));
         robot.addListener(new InitListener(new InitListener.Listener() {
             public void onInitialized() {
                 Message notification = uiHandler.obtainMessage(0, "Initialized Firmata.");
@@ -82,14 +89,13 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                     // Set pin 8 and 9 to servo mode.
                     robot.send(new SetPinModeMessage(8, SetPinModeMessage.PIN_MODE.SERVO.getMode()));
                     robot.send(new SetPinModeMessage(9, SetPinModeMessage.PIN_MODE.SERVO.getMode()));
-                    // Stop the robot by setting its speed to 0.
-                    robot.send(constructAccelerationServoConfigMessage(90));
-                    // Turn its wheels to look straight forward.
-                    robot.send(constructTurningServoConfigMessage(90));
                 }
                 catch (SerialException e) {
                     Log.e(LOGTAG, e.toString());
                 }
+                // Set the robot's speed to 0 and turn its wheels to look straight forward.
+                stopRobot();
+                // Start control loop.
                 tickForControl();
             }
         }));
@@ -111,14 +117,13 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
         }
 
         // Set up communication channel with the user.
-        waypoints = new LinkedList<>();
-        mMeteor = new Meteor(context, context.getResources().getString(R.string.ddp_uri));
         mMeteor.addCallback(this);
         mMeteor.connect();
     }
 
     public void terminate() {
         terminated = true;
+        quitSafely();
         try {
             robot.getSerial().stop();
         }
@@ -137,25 +142,93 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                     // The control loop should terminate.
                     return;
                 }
-                try {
-                    // TODO Write robot navigation logic
-                    robot.send(constructAccelerationServoConfigMessage(90));
-                    robot.send(constructTurningServoConfigMessage(90));
+
+                // If there is no waypoint to reach, just rest.
+                Waypoint goal = getNextUnvisitedWaypoint();
+                if (goal == null) {
+                    stopRobot(); tickForControl(); return;
                 }
-                catch (SerialException e) {
-                    Log.e(LOGTAG, e.toString());
+
+                // If location data is insufficient, wait for better GPS signal.
+                Location location = getLastLocation();
+                if (location == null || !location.hasAccuracy()) {
+                    stopRobot(); tickForControl(); return;
                 }
+                float accuracy = location.getAccuracy();
+                if (accuracy > 10.0f) {
+                    stopRobot(); tickForControl(); return;
+                }
+
+                // Determine the next waypoint to reach.
+                float[] dist = new float[]{0.0f, 0.0f};  // distance in metres and initial bearing
+                Location.distanceBetween(location.getLatitude(), location.getLongitude(),
+                                         goal.lat, goal.lng, dist);
+                while (dist[0] < accuracy) {
+                    goal.visited = true;
+                    Message notification =
+                            uiHandler.obtainMessage(0, "Reached waypoint " + goal.documentId);
+                    notification.sendToTarget();
+                    goal = getNextUnvisitedWaypoint();
+                    if (goal == null) break;
+                    Location.distanceBetween(location.getLatitude(), location.getLongitude(),
+                            goal.lat, goal.lng, dist);
+                }
+
+                // Every waypoint was visited.
+                if (goal == null) {
+                    stopRobot(); tickForControl(); return;
+                }
+
+                // Go toward the first unvisited waypoint.
+                float turning = 0.0f;
+                if (location.hasBearing()) {
+                    float bearing = location.getBearing();
+                    if (bearing > dist[1]) {
+                        bearing = bearing - 360.0f;
+                    }
+                    turning = dist[1] - bearing;
+                    if (turning > 180.0) {
+                        turning = turning - 360.0f;
+                    }
+                }
+                steerRobot(60, 90 + Math.min(Math.max(Math.round(turning), -30), 30));
+
+                // Set up next iteration of control loop.
                 tickForControl();
             }
-        }, 250);
+        }, 250);  // 4 control events per second
     }
 
-    private ServoConfigMessage constructAccelerationServoConfigMessage(int acceleration) {
+    @Nullable
+    private Waypoint getNextUnvisitedWaypoint() {
+        for (Waypoint wp : waypoints) {
+            if (!wp.visited) {
+                return wp;
+            }
+        }
+        return null;
+    }
+
+    private void stopRobot() {
+        steerRobot(90, 90);
+    }
+
+    private void steerRobot(int speed, int turning) {
+        try {
+            robot.send(constructAccelerationServoConfigMessage(speed));
+            robot.send(constructTurningServoConfigMessage(turning));
+        }
+        catch (SerialException e) {
+            Log.e(LOGTAG, e.toString());
+        }
+    }
+
+    private ServoConfigMessage constructAccelerationServoConfigMessage(int speed) {
         ServoConfigMessage servo = new ServoConfigMessage();
         servo.setPin(8);
         servo.setMinPulse(544);
         servo.setMaxPulse(2400);
-        servo.setAngle(acceleration);
+        servo.setAngle(speed);
         return servo;
     }
 

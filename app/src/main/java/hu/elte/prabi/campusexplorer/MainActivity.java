@@ -91,7 +91,7 @@ public class MainActivity
                         UsbDeviceConnection connection = usbManager.openDevice(usbDevice);
                         robotHandlerThread =
                                 new RobotHandlerThread(uiHandler, context, usbDevice, connection);
-                        logOnScreen("Robot connected.");
+                        robotHandlerThread.start();
                     }
                 } else {
                     Toast.makeText(context, "USB permission denied.", Toast.LENGTH_SHORT).show();
@@ -181,6 +181,7 @@ public class MainActivity
         }
         LocationServices.FusedLocationApi.removeLocationUpdates(gApiClient, this);
         gApiClient.disconnect();
+        gApiClient = null;
         super.onDestroy();
     }
 
