@@ -37,10 +37,12 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
     private Handler uiHandler;
     private Firmata robot;
     private boolean terminated = false;
+    private boolean sentControlMsg = false;
     private Location lastLocation;
 
     public synchronized void registerLocation(Location newLocation) {
         lastLocation = newLocation;
+        robotHandler.post(robotControlFunction);
     }
 
     private synchronized Location getLastLocation() {
@@ -65,6 +67,66 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
     // Communication channel with the user, and places to visit.
     private Meteor mMeteor;
     private List<Waypoint> waypoints = new LinkedList<>();
+
+    private Runnable robotControlFunction = new Runnable() {
+        @Override
+        public void run() {
+            if (terminated) {
+                return;
+            }
+            sentControlMsg = true;
+
+            // If there is no waypoint to reach, just rest.
+            Waypoint goal = getNextUnvisitedWaypoint();
+            if (goal == null) {
+                stopRobot(); return;
+            }
+
+            // If location data is insufficient, wait for better GPS signal.
+            Location location = getLastLocation();
+            if (location == null || !location.hasAccuracy()) {
+                stopRobot(); return;
+            }
+            float accuracy = location.getAccuracy();
+            if (accuracy > 10.0f) {
+                stopRobot(); return;
+            }
+
+            // Determine the next waypoint to reach.
+            float[] dist = new float[]{0.0f, 0.0f};  // distance in metres and initial bearing
+            Location.distanceBetween(location.getLatitude(), location.getLongitude(),
+                    goal.lat, goal.lng, dist);
+            while (dist[0] < accuracy) {
+                goal.visited = true;
+                Message notification =
+                        uiHandler.obtainMessage(0, "Reached waypoint " + goal.documentId);
+                notification.sendToTarget();
+                goal = getNextUnvisitedWaypoint();
+                if (goal == null) break;
+                Location.distanceBetween(location.getLatitude(), location.getLongitude(),
+                        goal.lat, goal.lng, dist);
+            }
+
+            // Every waypoint was visited.
+            if (goal == null) {
+                stopRobot(); return;
+            }
+
+            // Go toward the first unvisited waypoint.
+            float turning = 0.0f;
+            if (location.hasBearing()) {
+                float bearing = location.getBearing();
+                if (bearing > dist[1]) {
+                    bearing = bearing - 360.0f;
+                }
+                turning = dist[1] - bearing;
+                if (turning > 180.0) {
+                    turning = turning - 360.0f;
+                }
+            }
+            steerRobot(60, 90 + Math.min(Math.max(Math.round(turning), -30), 30));
+        }
+    };
 
     public RobotHandlerThread(Handler handler,   // Message Handler of the UI thread
                               Context context,   // Application Context for Meteor DDP
@@ -95,8 +157,8 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                 }
                 // Set the robot's speed to 0 and turn its wheels to look straight forward.
                 stopRobot();
-                // Start control loop.
-                tickForControl();
+                // Start robot stopping pulse (in case of input outage).
+                securityPulse();
             }
         }));
 
@@ -134,69 +196,18 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
         mMeteor.removeCallback(this);
     }
 
-    private void tickForControl() {
+    private void securityPulse() {
         robotHandler.postDelayed(new Runnable() {
             @Override
-            public void run() {
-                if (terminated) {
-                    // The control loop should terminate.
-                    return;
+            public void run () {
+                if (!sentControlMsg) {
+                    stopRobot();
                 }
-
-                // If there is no waypoint to reach, just rest.
-                Waypoint goal = getNextUnvisitedWaypoint();
-                if (goal == null) {
-                    stopRobot(); tickForControl(); return;
+                else {
+                    sentControlMsg = false;
                 }
-
-                // If location data is insufficient, wait for better GPS signal.
-                Location location = getLastLocation();
-                if (location == null || !location.hasAccuracy()) {
-                    stopRobot(); tickForControl(); return;
-                }
-                float accuracy = location.getAccuracy();
-                if (accuracy > 10.0f) {
-                    stopRobot(); tickForControl(); return;
-                }
-
-                // Determine the next waypoint to reach.
-                float[] dist = new float[]{0.0f, 0.0f};  // distance in metres and initial bearing
-                Location.distanceBetween(location.getLatitude(), location.getLongitude(),
-                                         goal.lat, goal.lng, dist);
-                while (dist[0] < accuracy) {
-                    goal.visited = true;
-                    Message notification =
-                            uiHandler.obtainMessage(0, "Reached waypoint " + goal.documentId);
-                    notification.sendToTarget();
-                    goal = getNextUnvisitedWaypoint();
-                    if (goal == null) break;
-                    Location.distanceBetween(location.getLatitude(), location.getLongitude(),
-                            goal.lat, goal.lng, dist);
-                }
-
-                // Every waypoint was visited.
-                if (goal == null) {
-                    stopRobot(); tickForControl(); return;
-                }
-
-                // Go toward the first unvisited waypoint.
-                float turning = 0.0f;
-                if (location.hasBearing()) {
-                    float bearing = location.getBearing();
-                    if (bearing > dist[1]) {
-                        bearing = bearing - 360.0f;
-                    }
-                    turning = dist[1] - bearing;
-                    if (turning > 180.0) {
-                        turning = turning - 360.0f;
-                    }
-                }
-                steerRobot(60, 90 + Math.min(Math.max(Math.round(turning), -30), 30));
-
-                // Set up next iteration of control loop.
-                tickForControl();
             }
-        }, 250);  // 4 control events per second
+        }, 1500);
     }
 
     @Nullable
@@ -260,13 +271,17 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
         try {
             if (!collectionName.equals("markers")) return;
             JSONObject jObject = new JSONObject(newValuesJson);
+            Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
             waypoints.add(jObject.getInt("id"),
                           new Waypoint(jObject.getDouble("lat"),
                                        jObject.getDouble("lng"),
                                        jObject.getInt("id"),
                                        documentID));
-            Message notification = uiHandler.obtainMessage(0, "Received new waypoint.");
+            Message notification = uiHandler.obtainMessage(0, "New waypoint " + documentID);
             notification.sendToTarget();
+            if (firstUnvisitedWaypoint == null || jObject.getInt("id") < firstUnvisitedWaypoint.id) {
+                robotHandler.post(robotControlFunction);
+            }
         } catch (JSONException e) {
             Log.e(LOGTAG, e.toString());
         }
@@ -278,8 +293,10 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                               String updatedValuesJson,
                               String removedValuesJson) {
         try {
-            JSONObject jObject = new JSONObject(updatedValuesJson);
             if (!collectionName.equals("markers")) return;
+            JSONObject jObject = new JSONObject(updatedValuesJson);
+            Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
+            Integer newId = null;
             for (Waypoint wp : waypoints) {
                 if (wp.documentId.equals(documentID)) {
                     if(jObject.has("lat"))
@@ -288,11 +305,17 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                         wp.lng = jObject.getDouble("lng");
                     if(jObject.has("id"))
                         wp.id = jObject.getInt("id");
+                    newId = wp.id;
                     break;
                 }
             }
-            Message notification = uiHandler.obtainMessage(0, "Received modified waypoint.");
+            Message notification = uiHandler.obtainMessage(0, "Modified waypoint " + documentID);
             notification.sendToTarget();
+            if (firstUnvisitedWaypoint != null && (
+                    documentID.equals(firstUnvisitedWaypoint.documentId) ||
+                    newId != null && newId < firstUnvisitedWaypoint.id)) {
+                robotHandler.post(robotControlFunction);
+            }
         } catch (JSONException e) {
             Log.e(LOGTAG, e.toString());
         }
@@ -301,6 +324,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
     @Override
     public void onDataRemoved(String collectionName, String documentID) {
         if (!collectionName.equals("markers")) return;
+        Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
         Waypoint toRemove = null;
         for (Waypoint wp : waypoints) {
             if (wp.documentId.equals(documentID)) {
@@ -310,8 +334,11 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
         }
         assert toRemove != null;
         waypoints.remove(toRemove);
-        Message notification = uiHandler.obtainMessage(0, "Received deleted waypoint.");
+        Message notification = uiHandler.obtainMessage(0, "Deleted waypoint " + documentID);
         notification.sendToTarget();
+        if (firstUnvisitedWaypoint != null && documentID.equals(firstUnvisitedWaypoint.documentId)) {
+            robotHandler.post(robotControlFunction);
+        }
     }
 
     @Override
