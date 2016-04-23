@@ -79,16 +79,19 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
             // If there is no waypoint to reach, just rest.
             Waypoint goal = getNextUnvisitedWaypoint();
             if (goal == null) {
+                Log.d(LOGTAG, "Stopped, because there's no unvisited waypoints to reach.");
                 stopRobot(); return;
             }
 
             // If location data is insufficient, wait for better GPS signal.
             Location location = getLastLocation();
             if (location == null || !location.hasAccuracy()) {
+                Log.d(LOGTAG, "Stopped, because no location with accuracy is present.");
                 stopRobot(); return;
             }
             float accuracy = location.getAccuracy();
             if (accuracy > 10.0f) {
+                Log.d(LOGTAG, "Stopped, because of insufficient location accuracy.");
                 stopRobot(); return;
             }
 
@@ -109,6 +112,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
 
             // Every waypoint was visited.
             if (goal == null) {
+                Log.d(LOGTAG, "Stopped, because there's no unvisited waypoints to reach.");
                 stopRobot(); return;
             }
 
@@ -124,6 +128,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                     turning = turning - 360.0f;
                 }
             }
+            Log.d(LOGTAG, "Chasing waypoint with turning value " + Float.toString(turning));
             steerRobot(60, 90 + Math.min(Math.max(Math.round(turning), -30), 30));
         }
     };
@@ -201,11 +206,13 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
             @Override
             public void run () {
                 if (!sentControlMsg) {
+                    Log.d(LOGTAG, "Security pulse has stopped the robot.");
                     stopRobot();
                 }
                 else {
                     sentControlMsg = false;
                 }
+                securityPulse();
             }
         }, 1500);
     }
