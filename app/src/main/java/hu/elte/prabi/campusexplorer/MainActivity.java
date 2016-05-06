@@ -24,7 +24,6 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
@@ -54,6 +53,8 @@ public class MainActivity
     private final String ACTION_USB_PERMISSION = "hu.elte.prabi.campusexplorer.USB_PERMISSION";
     private final String LOGTAG = "CampusExplorerMainA";
     private Set<Integer> compatibleBoardVendorIds = new HashSet<>();
+    private UsbManager usbManager;
+    private UsbDevice usbDevice;
     private RobotHandlerThread robotHandlerThread;
     private Handler uiHandler;
     private GoogleApiClient gApiClient;
@@ -68,8 +69,6 @@ public class MainActivity
 
     @Nullable
     private UsbDevice findFirmataCompatibleUsbDevice() {
-        UsbManager usbManager = (UsbManager)
-            getSystemService(hu.elte.prabi.campusexplorer.MainActivity.USB_SERVICE);
         for (UsbDevice device : usbManager.getDeviceList().values()) {
             if (compatibleBoardVendorIds.contains(device.getVendorId())) {
                 return device;
@@ -84,32 +83,29 @@ public class MainActivity
         public void onReceive(Context context, Intent intent) {
             if (intent.getAction().equals(ACTION_USB_PERMISSION)) {
                 if (intent.getExtras().getBoolean(UsbManager.EXTRA_PERMISSION_GRANTED)) {
-                    UsbDevice usbDevice = findFirmataCompatibleUsbDevice();
-                    if (usbDevice != null) {
-                        UsbManager usbManager = (UsbManager)
-                            getSystemService(hu.elte.prabi.campusexplorer.MainActivity.USB_SERVICE);
-                        UsbDeviceConnection connection = usbManager.openDevice(usbDevice);
-                        robotHandlerThread =
-                                new RobotHandlerThread(uiHandler, context, usbDevice, connection);
-                        robotHandlerThread.start();
-                    }
+                    logOnScreen("Requested USB permission, starting control thread...");
+                    UsbDeviceConnection connection = usbManager.openDevice(usbDevice);
+                    robotHandlerThread =
+                            new RobotHandlerThread(uiHandler, context, usbDevice, connection);
+                    robotHandlerThread.start();
                 } else {
-                    Toast.makeText(context, "USB permission denied.", Toast.LENGTH_SHORT).show();
+                    logOnScreen("USB permission denied.");
                 }
             }
             else if (intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_ATTACHED)) {
-                UsbDevice device = findFirmataCompatibleUsbDevice();
-                if (device != null) {
+                logOnScreen("USB device attached.");
+                usbDevice = findFirmataCompatibleUsbDevice();
+                if (usbDevice != null) {
                     Intent usbPermIntent = new Intent(ACTION_USB_PERMISSION);
                     PendingIntent pi = PendingIntent.getBroadcast(context, 0, usbPermIntent, 0);
-                    UsbManager usbManager = (UsbManager)
-                            getSystemService(hu.elte.prabi.campusexplorer.MainActivity.USB_SERVICE);
-                    usbManager.requestPermission(device, pi);
+                    usbManager.requestPermission(usbDevice, pi);
                 }
             }
             else if (intent.getAction().equals(UsbManager.ACTION_USB_DEVICE_DETACHED)) {
-                robotHandlerThread.terminate();
-                robotHandlerThread = null;
+                if (robotHandlerThread != null) {
+                    robotHandlerThread.terminate();
+                    robotHandlerThread = null;
+                }
                 logOnScreen("Robot disconnected.");
             }
         }
@@ -166,6 +162,8 @@ public class MainActivity
         gApiClient.connect();
 
         // Register IntentFilter for managing USB connection issues.
+        usbManager = (UsbManager)
+                getSystemService(hu.elte.prabi.campusexplorer.MainActivity.USB_SERVICE);
         IntentFilter filter = new IntentFilter();
         filter.addAction(ACTION_USB_PERMISSION);
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
@@ -182,6 +180,7 @@ public class MainActivity
         LocationServices.FusedLocationApi.removeLocationUpdates(gApiClient, this);
         gApiClient.disconnect();
         gApiClient = null;
+        unregisterReceiver(broadcastReceiver);
         super.onDestroy();
     }
 
