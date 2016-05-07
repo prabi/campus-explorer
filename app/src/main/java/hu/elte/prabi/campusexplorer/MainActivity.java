@@ -218,12 +218,15 @@ public class MainActivity
 
     @Override
     public void onConnectionSuspended(int i) {
-
+        logOnScreen("Location service has suspended.");
+        if (robotHandlerThread != null) {
+            robotHandlerThread.registerLocation(null);
+        }
     }
 
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-
+        logOnScreen("Connection to location service failed.");
     }
 
     @Override
@@ -241,7 +244,7 @@ public class MainActivity
             requestLocationUpdates();
         }
         else {
-            logOnScreen("User denied access to location services, app won't work.");
+            logOnScreen("User denied access to location service, app won't work.");
         }
     }
 

@@ -18,7 +18,6 @@ import java.util.List;
 
 import name.antonsmirnov.firmata.Firmata;
 import name.antonsmirnov.firmata.IFirmata;
-import name.antonsmirnov.firmata.InitListener;
 import name.antonsmirnov.firmata.message.ServoConfigMessage;
 import name.antonsmirnov.firmata.message.SetPinModeMessage;
 import name.antonsmirnov.firmata.serial.SerialException;
@@ -147,26 +146,6 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
     protected void onLooperPrepared() {
         robotHandler = new Handler(getLooper());
 
-        // Robot initialization.
-        robot.addListener(new InitListener(new InitListener.Listener() {
-            public void onInitialized() {
-                Message notification = uiHandler.obtainMessage(0, "Initialized Firmata.");
-                notification.sendToTarget();
-                try {
-                    // Set pin 8 and 9 to servo mode.
-                    robot.send(new SetPinModeMessage(8, SetPinModeMessage.PIN_MODE.SERVO.getMode()));
-                    robot.send(new SetPinModeMessage(9, SetPinModeMessage.PIN_MODE.SERVO.getMode()));
-                }
-                catch (SerialException e) {
-                    Log.e(LOGTAG, e.toString());
-                }
-                // Set the robot's speed to 0 and turn its wheels to look straight forward.
-                stopRobot();
-                // Start robot stopping pulse (in case of input outage).
-                securityPulse();
-            }
-        }));
-
         // Log unhandled bytes received from USB Serial.
         robot.addListener(new IFirmata.StubListener() {
             @Override
@@ -182,6 +161,20 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
         catch (SerialException e) {
             Log.e(LOGTAG, e.toString());
         }
+
+        // Initialize robot control.
+        try {
+            // Set pin 8 and 9 to servo mode.
+            robot.send(new SetPinModeMessage(8, SetPinModeMessage.PIN_MODE.SERVO.getMode()));
+            robot.send(new SetPinModeMessage(9, SetPinModeMessage.PIN_MODE.SERVO.getMode()));
+        }
+        catch (SerialException e) {
+            Log.e(LOGTAG, e.toString());
+        }
+        // Set the robot's speed to 0 and turn its wheels to look straight forward.
+        stopRobot();
+        // Start robot stopping pulse (in case of input outage).
+        securityPulse();
 
         // Set up communication channel with the user.
         mMeteor.addCallback(this);
@@ -212,7 +205,9 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                 else {
                     sentControlMsg = false;
                 }
-                securityPulse();
+                if (!terminated) {
+                    securityPulse();
+                }
             }
         }, 1500);
     }
