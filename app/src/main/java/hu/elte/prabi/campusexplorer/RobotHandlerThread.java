@@ -129,6 +129,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
             }
             Log.d(LOGTAG, "Chasing waypoint with turning value " + Float.toString(turning));
             steerRobot(60, 90 + Math.min(Math.max(Math.round(turning), -30), 30));
+            mMeteor.call("LogPosition", new Object[]{location.getLatitude(), location.getLongitude()});
         }
     };
 
@@ -271,7 +272,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                             String documentID,
                             String newValuesJson) {
         try {
-            if (!collectionName.equals("markers")) return;
+            if (!collectionName.equals("directionwaypoints")) return;
             JSONObject jObject = new JSONObject(newValuesJson);
             Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
             waypoints.add(jObject.getInt("id"),
@@ -295,7 +296,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                               String updatedValuesJson,
                               String removedValuesJson) {
         try {
-            if (!collectionName.equals("markers")) return;
+            if (!collectionName.equals("directionwaypoints")) return;
             JSONObject jObject = new JSONObject(updatedValuesJson);
             Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
             Integer newId = null;
@@ -325,7 +326,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
 
     @Override
     public void onDataRemoved(String collectionName, String documentID) {
-        if (!collectionName.equals("markers")) return;
+        if (!collectionName.equals("directionwaypoints")) return;
         Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
         Waypoint toRemove = null;
         for (Waypoint wp : waypoints) {
