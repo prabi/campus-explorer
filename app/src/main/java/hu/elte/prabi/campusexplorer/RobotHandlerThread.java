@@ -37,6 +37,7 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
     private Firmata robot;
     private boolean terminated = false;
     private boolean sentControlMsg = false;
+    private boolean paused = false;
     private Location lastLocation;
 
     public synchronized void registerLocation(Location newLocation) {
@@ -74,6 +75,12 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                 return;
             }
             sentControlMsg = true;
+
+            // If the robot is paused, stop immediately.
+            if (paused) {
+                Log.d(LOGTAG, "Stopped, because the robot is paused.");
+                stopRobot(); return;
+            }
 
             // If there is no waypoint to reach, just rest.
             Waypoint goal = getNextUnvisitedWaypoint();
@@ -272,17 +279,26 @@ class RobotHandlerThread extends HandlerThread implements MeteorCallback {
                             String documentID,
                             String newValuesJson) {
         try {
-            if (!collectionName.equals("directionwaypoints")) return;
-            JSONObject jObject = new JSONObject(newValuesJson);
-            Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
-            waypoints.add(jObject.getInt("id"),
-                          new Waypoint(jObject.getDouble("lat"),
-                                       jObject.getDouble("lng"),
-                                       jObject.getInt("id"),
-                                       documentID));
-            Message notification = uiHandler.obtainMessage(0, "New waypoint " + documentID);
-            notification.sendToTarget();
-            if (firstUnvisitedWaypoint == null || jObject.getInt("id") < firstUnvisitedWaypoint.id) {
+            if (collectionName.equals("directionwaypoints")) {
+                JSONObject jObject = new JSONObject(newValuesJson);
+                Waypoint firstUnvisitedWaypoint = getNextUnvisitedWaypoint();
+                waypoints.add(jObject.getInt("id"),
+                        new Waypoint(jObject.getDouble("lat"),
+                                jObject.getDouble("lng"),
+                                jObject.getInt("id"),
+                                documentID));
+                Message notification = uiHandler.obtainMessage(0, "New waypoint " + documentID);
+                notification.sendToTarget();
+                if (firstUnvisitedWaypoint == null || jObject.getInt("id") < firstUnvisitedWaypoint.id) {
+                    robotHandler.post(robotControlFunction);
+                }
+            }
+            else if (collectionName.equals("robotstate")) {
+                JSONObject jObject = new JSONObject(newValuesJson);
+                String state = jObject.getString("state");
+                paused = state.equals("Stop");
+                Message notification = uiHandler.obtainMessage(0, "New state " + state);
+                notification.sendToTarget();
                 robotHandler.post(robotControlFunction);
             }
         } catch (JSONException e) {
